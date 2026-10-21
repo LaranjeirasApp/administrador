@@ -204,6 +204,37 @@ export function linkConvite(origin, token) {
   return `${String(origin || '').replace(/\/+$/, '')}/convite/${encodeURIComponent(token)}`;
 }
 
+const COLLATOR = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true });
+const vazio = v => v === null || v === undefined || v === '';
+
+/**
+ * Cópia ordenada da lista pelo valor que getValor devolve. Texto segue a ordem
+ * do português (sem diferenciar acento/maiúscula); vazios sempre no fim;
+ * empates mantêm a ordem anterior.
+ */
+export function ordenarLista(items, getValor, dir = 'asc') {
+  const sinal = dir === 'desc' ? -1 : 1;
+  return [...(items || [])].sort((a, b) => {
+    const va = getValor(a), vb = getValor(b);
+    if (vazio(va) || vazio(vb)) return vazio(va) === vazio(vb) ? 0 : vazio(va) ? 1 : -1;
+    const c = typeof va === 'number' && typeof vb === 'number' ? va - vb : COLLATOR.compare(String(va), String(vb));
+    return c * sinal;
+  });
+}
+
+/** Dia com mais partidas a partir de { "AAAA-MM-DD": { s, d } }. Empate: o mais recente. */
+export function diaMaisCheio(porDiaTipo) {
+  let melhor = null;
+  for (const [dia, v] of Object.entries(porDiaTipo || {})) {
+    const total = (v?.s || 0) + (v?.d || 0);
+    if (!total) continue;
+    if (!melhor || total > melhor.total || (total === melhor.total && dia > melhor.dia)) {
+      melhor = { dia, total, simples: v.s || 0, duplas: v.d || 0 };
+    }
+  }
+  return melhor;
+}
+
 /** "1 partida" ou "3 partidas" */
 export function pluralize(n, singular, plural) {
   return `${n} ${n === 1 ? singular : plural}`;

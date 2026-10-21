@@ -14,11 +14,20 @@
  */
 
 import { ref, get, set, update, remove, onValue, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-import { escHtml, normalizarNome, formatDate, linkConvite } from "../utils.js";
-import { icon, emptyState, loading, errorBox, confirmDialog, iniciais } from "../ui.js";
+import { escHtml, normalizarNome, formatDate, linkConvite, ordenarLista } from "../utils.js";
+import { icon, emptyState, loading, errorBox, confirmDialog, iniciais, trapFocus, ocupado, thOrdenavel } from "../ui.js";
 import { LIMITE_PESSOAS, montarNovaPessoa, montarRemocaoPessoa, montarAuditoria, unidadeFmt } from "../escritas.js";
 
 const CONVITE_VALIDADE_MS = 86400000;
+
+// valor usado para ordenar cada coluna
+const CAMPOS = {
+  id: u => u.id,
+  status: u => u.status === 'confirmada' ? '1' : u.status === 'rascunho' ? '2' : (u.status || ''),
+  convite: u => u.conviteAtual ? 'gerado' : '',
+  criadoEm: u => u.criadoEm || null,
+  acesso: u => u.ativo !== false ? '1' : '2',
+};
 
 export async function render(container, { db, user, showToast }) {
   const adminUid = user?.uid || null;
@@ -94,6 +103,9 @@ export async function render(container, { db, user, showToast }) {
   const $ = id => document.getElementById(id);
   let allUnidades = null;
   let aba = 'ativas';
+  let ordem = { chave: 'id', dir: 'asc' };
+  let soltarDrawer = null;
+  let soltarNova = null;
 
   const unsub = onValue(ref(db, 'unidades'), snap => {
     allUnidades = snap.val() || {};
@@ -139,7 +151,9 @@ export async function render(container, { db, user, showToast }) {
       const dig = q.replace(/\D/g, '');
       items = items.filter(u => normalizarNome(u.id).includes(q) || (dig && u.id.replace(/\D/g, '').includes(dig)));
     }
-    items.sort((a, b) => a.id.localeCompare(b.id));
+    // ordem pelo código desempata as outras colunas
+    items = ordenarLista(ordenarLista(items, CAMPOS.id, 'asc'), CAMPOS[ordem.chave], ordem.dir);
+    const agrupar = ordem.chave === 'id';
 
     const el = $('un-table');
     if (!todas.length) {
@@ -154,9 +168,10 @@ export async function render(container, { db, user, showToast }) {
       return;
     }
 
+    // ordem pelo código: agrupa por quadra; outra coluna: lista corrida
     const grupos = new Map();
     items.forEach(u => {
-      const g = u.id.split('-')[0];
+      const g = agrupar ? u.id.split('-')[0] : '';
       if (!grupos.has(g)) grupos.set(g, []);
       grupos.get(g).push(u);
     });
@@ -165,11 +180,18 @@ export async function render(container, { db, user, showToast }) {
       <div class="table-scroll">
         <table class="table table-stack table-compact">
           <thead>
-            <tr><th>Unidade</th><th>Cadastro</th><th>Convite</th><th>Criada em</th><th>Acesso</th><th class="w-1"><span class="sr-only">Abrir</span></th></tr>
+            <tr>
+              ${thOrdenavel('id', 'Unidade', ordem)}
+              ${thOrdenavel('status', 'Cadastro', ordem)}
+              ${thOrdenavel('convite', 'Convite', ordem)}
+              ${thOrdenavel('criadoEm', 'Criada em', ordem)}
+              ${thOrdenavel('acesso', 'Acesso', ordem)}
+              <th class="w-1"><span class="sr-only">Abrir</span></th>
+            </tr>
           </thead>
           <tbody>
             ${[...grupos.entries()].map(([g, us]) => `
-              <tr class="group-row"><td colspan="6">${g === '99' ? 'Quadra 99 · unidades internas' : `Quadra ${escHtml(g)}`} · ${us.length} ${us.length === 1 ? 'unidade' : 'unidades'}</td></tr>
+              ${agrupar ? `<tr class="group-row"><td colspan="6">${g === '99' ? 'Quadra 99 · unidades internas' : `Quadra ${escHtml(g)}`} · ${us.length} ${us.length === 1 ? 'unidade' : 'unidades'}</td></tr>` : ''}
               ${us.map(u => `
                 <tr class="row-link" data-ver="${escHtml(u.id)}">
                   <td data-label="Unidade" class="td-lead"><span class="tag">${escHtml(u.id)}</span></td>
@@ -188,7 +210,11 @@ export async function render(container, { db, user, showToast }) {
 
   // ── Detalhe (painel lateral) ───────────────────────────
   function fecharDrawer() {
-    $('un-drawer')?.remove();
+    const d = $('un-drawer');
+    if (!d) return;
+    d.remove();
+    soltarDrawer?.();
+    soltarDrawer = null;
   }
 
   async function abrirDetalhe(id) {
@@ -212,6 +238,7 @@ export async function render(container, { db, user, showToast }) {
         <div class="drawer-body" id="un-dr-body">${loading()}</div>
       </aside>`;
     $('un-page').appendChild(wrap);
+    soltarDrawer = trapFocus(wrap);
     wrap.addEventListener('click', e => {
       if (e.target === wrap || e.target.closest('[data-close]')) fecharDrawer();
     });
@@ -354,7 +381,18 @@ export async function render(container, { db, user, showToast }) {
       </section>`;
 
     $('un-det-ativo')?.addEventListener('change', async e => {
-      const ativo = e.target.checked;
+      const el = e.target;
+      const ativo = el.checked;
+      if (!ativo) {
+        const ok = await confirmDialog({
+          title: `Desativar a unidade ${u.id}?`,
+          message: 'Ela sai da lista de casas do formulário de cadastro até você ativar de novo.',
+          confirmLabel: 'Desativar unidade',
+          tone: 'danger',
+        });
+        if (!ok) { el.checked = true; el.focus(); return; }
+      }
+      el.disabled = true;
       try {
         await update(ref(db, `unidades/${u.id}`), { ativo });
         await syncUnidadesPublicas(db, u.id, ativo);
@@ -363,12 +401,15 @@ export async function render(container, { db, user, showToast }) {
         if (badges) badges.innerHTML = cabecalhoBadges(u);
         showToast?.(ativo ? `Unidade ${u.id} ativada.` : `Unidade ${u.id} desativada.`, 'ok');
       } catch (err) {
-        e.target.checked = !ativo;
+        el.checked = !ativo;
         showToast?.('Erro: ' + err.message, 'err');
+      } finally {
+        el.disabled = false;
+        el.focus({ preventScroll: true });
       }
     });
 
-    $('un-convite-gerar')?.addEventListener('click', () => gerarConvite(u.id));
+    $('un-convite-gerar')?.addEventListener('click', e => gerarConvite(u.id, e.currentTarget));
 
     $('un-convite-copiar')?.addEventListener('click', () => {
       const input = $('un-convite-url');
@@ -385,11 +426,15 @@ export async function render(container, { db, user, showToast }) {
         tone: 'danger',
       });
       if (!ok) return;
+      const soltar = ocupado($('un-convite-revogar'), 'Revogando…');
       try {
         await update(ref(db, `convites/${u.conviteAtual}`), { revogado: true });
         showToast?.('Convite revogado.', 'ok');
         abrirDetalhe(u.id);
-      } catch (err) { showToast?.('Erro: ' + err.message, 'err'); }
+      } catch (err) {
+        soltar();
+        showToast?.('Erro: ' + err.message, 'err');
+      }
     });
 
     // ── Adicionar pessoa ─────────────────────────────────
@@ -420,8 +465,7 @@ export async function render(container, { db, user, showToast }) {
         adminUid, novoId, agora: Date.now(),
       });
       if (r.erro) return mostrarErro(r.erro);
-      const btn = $('un-add-salvar');
-      btn.disabled = true;
+      const soltar = ocupado($('un-add-salvar'), 'Adicionando…');
       try {
         await update(ref(db), r.updates);
         pessoas[novoId] = r.pessoa;
@@ -430,7 +474,7 @@ export async function render(container, { db, user, showToast }) {
         showToast?.(`${r.pessoa.nome} entrou na unidade ${u.id}.`, 'ok');
         renderDetalhe(u, pessoas, convite);
       } catch (err) {
-        btn.disabled = false;
+        soltar();
         mostrarErro('Não foi possível adicionar: ' + err.message);
       }
     });
@@ -452,6 +496,8 @@ export async function render(container, { db, user, showToast }) {
         tone: 'danger',
       });
       if (!ok) return;
+      b.disabled = true;
+      b.setAttribute('aria-busy', 'true');
       try {
         await update(ref(db), r.updates);
         delete pessoas[pid];
@@ -459,13 +505,16 @@ export async function render(container, { db, user, showToast }) {
         showToast?.(`${p.nome} saiu da unidade ${u.id}.`, 'ok');
         renderDetalhe(u, pessoas, convite);
       } catch (err) {
+        b.disabled = false;
+        b.removeAttribute('aria-busy');
         showToast?.('Não foi possível remover: ' + err.message, 'err');
       }
     }));
   }
 
-  async function gerarConvite(unidadeId) {
+  async function gerarConvite(unidadeId, btn) {
     const token = gerarToken();
+    const soltar = ocupado(btn, 'Gerando…');
     try {
       await set(ref(db, `convites/${token}`), {
         unidadeId,
@@ -478,6 +527,7 @@ export async function render(container, { db, user, showToast }) {
       showToast?.('Convite gerado.', 'ok');
       abrirDetalhe(unidadeId);
     } catch (err) {
+      soltar();
       showToast?.('Erro: ' + err.message, 'err');
     }
   }
@@ -488,9 +538,15 @@ export async function render(container, { db, user, showToast }) {
     $('un-nova-lote').value = '';
     atualizarPreview();
     $('un-modal-nova').hidden = false;
+    soltarNova = trapFocus($('un-modal-nova'));
     $('un-nova-quadra').focus();
   }
-  function fecharNova() { $('un-modal-nova').hidden = true; }
+  function fecharNova() {
+    if ($('un-modal-nova').hidden) return;
+    $('un-modal-nova').hidden = true;
+    soltarNova?.();
+    soltarNova = null;
+  }
 
   function codigoDigitado() {
     const q = $('un-nova-quadra').value.replace(/\D/g, '');
@@ -510,11 +566,12 @@ export async function render(container, { db, user, showToast }) {
   $('un-modal-nova').addEventListener('click', e => { if (e.target === $('un-modal-nova')) fecharNova(); });
   $('un-nova-quadra').addEventListener('input', atualizarPreview);
   $('un-nova-lote').addEventListener('input', atualizarPreview);
-  $('un-nova-criar').addEventListener('click', async () => {
+  $('un-nova-criar').addEventListener('click', async e => {
     const id = codigoDigitado();
     if (!id) { showToast?.('Preencha quadra e lote com números.', 'err'); return; }
     if (allUnidades?.[id]) { showToast?.(`A unidade ${id} já existe.`, 'err'); return; }
     const [q, l] = id.split('-');
+    const soltar = ocupado(e.currentTarget, 'Criando…');
     try {
       await set(ref(db, `unidades/${id}`), {
         quadra: q, lotePrincipal: l,
@@ -522,9 +579,11 @@ export async function render(container, { db, user, showToast }) {
         criadoEm: Date.now(),
       });
       await syncUnidadesPublicas(db, id, true);
+      soltar();
       fecharNova();
       showToast?.(`Unidade ${id} criada.`, 'ok');
     } catch (err) {
+      soltar();
       showToast?.('Erro: ' + err.message, 'err');
     }
   });
@@ -539,6 +598,16 @@ export async function render(container, { db, user, showToast }) {
   $('un-quadra').addEventListener('change', renderTable);
   $('un-table').addEventListener('click', e => {
     if (e.target.closest('[data-action="nova"]')) return abrirNova();
+    const s = e.target.closest('[data-sort]');
+    if (s) {
+      const k = s.dataset.sort;
+      ordem = ordem.chave === k
+        ? { chave: k, dir: ordem.dir === 'asc' ? 'desc' : 'asc' }
+        : { chave: k, dir: k === 'criadoEm' ? 'desc' : 'asc' };
+      renderTable();
+      $('un-table').querySelector(`[data-sort="${k}"]`)?.focus();
+      return;
+    }
     const row = e.target.closest('[data-ver]');
     if (row) abrirDetalhe(row.dataset.ver);
   });
@@ -553,6 +622,8 @@ export async function render(container, { db, user, showToast }) {
   return () => {
     unsub();
     document.removeEventListener('keydown', onKey);
+    fecharDrawer();
+    fecharNova();
   };
 }
 

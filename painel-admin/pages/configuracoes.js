@@ -5,7 +5,7 @@
 
 import { ref, get, set } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { escHtml } from "../utils.js";
-import { icon, loading, errorBox, courtSvg, quadraAtiva } from "../ui.js";
+import { icon, loading, errorBox, courtSvg, quadraAtiva, confirmDialog, ocupado } from "../ui.js";
 
 export async function render(container, { db, showToast }) {
   container.innerHTML = `
@@ -126,20 +126,47 @@ export async function render(container, { db, showToast }) {
     }
   }
 
-  async function toggle(el, path) {
-    const ok = await setConfig(path, el.checked);
-    if (!ok) el.checked = !el.checked;
+  /**
+   * Interruptor: trava enquanto grava e volta atrás se der erro. `aoDesligar`
+   * (opcional) pede confirmação antes de desligar algo que afeta os moradores.
+   */
+  async function toggle(el, path, { aoDesligar, okMsg } = {}) {
+    const valor = el.checked;
+    if (!valor && aoDesligar) {
+      const ok = await confirmDialog({ ...aoDesligar, tone: 'danger' });
+      if (!ok) { el.checked = true; return false; }
+    }
+    el.disabled = true;
+    const ok = await setConfig(path, valor, okMsg?.(valor));
+    el.disabled = false;
+    if (!ok) el.checked = !valor;
+    el.focus({ preventScroll: true });
+    return ok;
   }
 
   $('conf-whatsapp').addEventListener('change', e => toggle(e.target, 'config/whatsappAvisoAtivo'));
-  $('conf-inscricoes').addEventListener('change', e => toggle(e.target, 'config/inscricoesOnlineAtivas'));
+  $('conf-inscricoes').addEventListener('change', e => toggle(e.target, 'config/inscricoesOnlineAtivas', {
+    aoDesligar: {
+      title: 'Desligar as inscrições pelo app?',
+      message: 'Os moradores deixam de conseguir entrar na fila pelo celular até você ligar de novo.\nSó o fiscal poderá inscrever.',
+      confirmLabel: 'Desligar inscrições',
+    },
+    okMsg: v => v ? 'Inscrições pelo app ligadas.' : 'Inscrições pelo app desligadas.',
+  }));
   $('conf-gps').addEventListener('change', e => toggle(e.target, 'config/checkinGpsAtivo'));
 
   [1, 2, 3, 4, 5].forEach(n => {
     $(`conf-quadra-${n}`).addEventListener('change', async e => {
+      const ok = await toggle(e.target, `config/quadras/${n}/ativa`, {
+        aoDesligar: {
+          title: `Desativar a Quadra ${n}?`,
+          message: 'Ela some do formulário de inscrição dos moradores até você ativar de novo.',
+          confirmLabel: 'Desativar quadra',
+        },
+        okMsg: v => v ? `Quadra ${n} ativada.` : `Quadra ${n} desativada.`,
+      });
+      if (!ok) return;
       const ativa = e.target.checked;
-      const ok = await setConfig(`config/quadras/${n}/ativa`, ativa, ativa ? `Quadra ${n} ativada.` : `Quadra ${n} desativada.`);
-      if (!ok) { e.target.checked = !ativa; return; }
       const row = $(`conf-tile-${n}`);
       row.classList.toggle('is-off', !ativa);
       row.querySelector('.court-row-state').textContent = estadoTexto(ativa);
@@ -151,13 +178,15 @@ export async function render(container, { db, showToast }) {
       $('conf-limite-valor').disabled = $('conf-limite-sem').checked;
     });
   });
-  $('conf-limite-save').addEventListener('click', () => {
+  $('conf-limite-save').addEventListener('click', async e => {
     const semLimite = $('conf-limite-sem').checked;
     const valor = semLimite ? null : Number($('conf-limite-valor').value) || 2;
-    setConfig('config/limiteDiarioGeral', valor, semLimite ? 'Limite removido.' : `Limite de ${valor} por dia salvo.`);
+    const soltar = ocupado(e.currentTarget);
+    await setConfig('config/limiteDiarioGeral', valor, semLimite ? 'Limite removido.' : `Limite de ${valor} por dia salvo.`);
+    soltar();
   });
 
-  $('conf-loc-save').addEventListener('click', async () => {
+  $('conf-loc-save').addEventListener('click', async e => {
     const lat = parseFloat($('conf-lat').value);
     const lng = parseFloat($('conf-lng').value);
     const raioMetros = parseInt($('conf-raio').value, 10);
@@ -165,7 +194,9 @@ export async function render(container, { db, showToast }) {
       showToast?.('Informe latitude e longitude.', 'err');
       return;
     }
+    const soltar = ocupado(e.currentTarget);
     const ok = await setConfig('config/localizacao', { lat, lng, raioMetros: raioMetros || 100 }, 'Localização salva.');
+    soltar();
     if (ok) {
       const a = $('conf-mapa');
       a.href = `https://www.google.com/maps?q=${lat},${lng}`;

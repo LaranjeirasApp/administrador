@@ -10,7 +10,7 @@
 
 import { ref, onValue, update, get, push } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import { fbPushToArray, escHtml, tempoRelativo } from "../utils.js";
-import { icon, emptyState, loading, errorBox, confirmDialog, iniciais } from "../ui.js";
+import { icon, emptyState, loading, errorBox, confirmDialog, iniciais, trapFocus, ocupado } from "../ui.js";
 import { montarAprovacao, montarAuditoria, unidadeFmt } from "../escritas.js";
 
 const ABAS = [
@@ -187,10 +187,13 @@ export async function render(container, { db, user, showToast }) {
     return `<span class="badge badge-neutral">${escHtml(status)}</span>`;
   }
 
-  async function aprovar(uid) {
+  async function aprovar(uid, btn) {
     const sol = allData.find(s => s._key === uid);
-    if (!sol || sol.status !== 'pendente') return;
+    if (!sol || sol.status !== 'pendente' || btn?.disabled) return;
     const fmt = unidadeFmt(sol.unidadeId);
+    // travado do clique até o fim: evita aprovar duas vezes
+    if (btn) btn.disabled = true;
+    const destravar = () => { if (btn && document.contains(btn)) btn.disabled = false; };
 
     // relê unidade e moradores na hora de decidir, como o fiscal faz
     let unidade, pessoasDaUnidade;
@@ -202,6 +205,7 @@ export async function render(container, { db, user, showToast }) {
       unidade = uSnap.val();
       pessoasDaUnidade = pSnap.val() || {};
     } catch (err) {
+      destravar();
       return showToast?.('Não consegui ler a unidade: ' + err.message, 'err');
     }
 
@@ -210,7 +214,7 @@ export async function render(container, { db, user, showToast }) {
       uid, solicitacao: sol, unidade, pessoasDaUnidade,
       adminUid: user?.uid, adminNome: decididoPor(), novoId, agora: Date.now(),
     });
-    if (r.erro) return showToast?.(r.erro, 'err');
+    if (r.erro) { destravar(); return showToast?.(r.erro, 'err'); }
 
     const ok = await confirmDialog({
       title: `Aprovar ${sol.nome}?`,
@@ -219,51 +223,62 @@ export async function render(container, { db, user, showToast }) {
         : `${sol.nome} entra como responsável pela unidade ${fmt}.\nA conta passa a ter acesso ao app.`,
       confirmLabel: 'Aprovar',
     });
-    if (!ok) return;
+    if (!ok) return destravar();
+    destravar();
+    const soltar = ocupado(btn, 'Aprovando…');
     try {
       await update(ref(db), r.updates);
       await registrar('Cadastro aprovado', `${sol.nome} — unidade ${fmt}${r.jaTemTitular ? ' (morador)' : ' (responsável)'}`);
       showToast?.(`Cadastro de ${sol.nome} aprovado.`, 'ok');
     } catch (err) {
+      soltar();
       showToast?.('Não foi possível aprovar: ' + err.message, 'err');
     }
   }
 
+  let soltarRecusa = null;
   function abrirModalRecusa(uid) {
     const sol = allData.find(s => s._key === uid);
     recusandoUid = uid;
     $('sol-motivo').value = '';
     $('sol-recusa-quem').textContent = sol ? `${sol.nome || sol.email} · unidade ${sol.unidadeId}` : '';
     $('sol-modal-recusa').hidden = false;
+    soltarRecusa = trapFocus($('sol-modal-recusa'));
     $('sol-motivo').focus();
   }
 
   function fecharModal() {
+    if ($('sol-modal-recusa').hidden) return;
     $('sol-modal-recusa').hidden = true;
     recusandoUid = null;
+    soltarRecusa?.();
+    soltarRecusa = null;
   }
 
   $('sol-list').addEventListener('click', e => {
     const ap = e.target.closest('[data-aprovar]');
-    if (ap) return aprovar(ap.dataset.aprovar);
+    if (ap) return aprovar(ap.dataset.aprovar, ap);
     const rc = e.target.closest('[data-recusar]');
     if (rc) abrirModalRecusa(rc.dataset.recusar);
   });
   $('sol-modal-close').addEventListener('click', fecharModal);
   $('sol-modal-cancelar').addEventListener('click', fecharModal);
   $('sol-modal-recusa').addEventListener('click', e => { if (e.target === $('sol-modal-recusa')) fecharModal(); });
-  $('sol-modal-confirmar').addEventListener('click', async () => {
+  $('sol-modal-confirmar').addEventListener('click', async e => {
     if (!recusandoUid) return;
     const motivo = $('sol-motivo').value.trim();
     const sol = allData.find(s => s._key === recusandoUid);
+    const soltar = ocupado(e.currentTarget, 'Recusando…');
     try {
       const updates = { status: 'recusada', decididoEm: Date.now(), decididoPor: decididoPor() };
       if (motivo) updates.motivo = motivo;
       await update(ref(db, 'solicitacoes/' + recusandoUid), updates);
+      soltar();
       fecharModal();
       await registrar('Cadastro recusado', `${sol?.nome || '—'} — unidade ${unidadeFmt(sol?.unidadeId)}${motivo ? ` — ${motivo}` : ''}`);
       showToast?.(`${sol?.nome || 'Solicitação'} recusada.`, 'ok');
     } catch (err) {
+      soltar();
       showToast?.('Erro: ' + err.message, 'err');
     }
   });
@@ -281,5 +296,6 @@ export async function render(container, { db, user, showToast }) {
   return () => {
     unsubscribe();
     document.removeEventListener('keydown', onKey);
+    fecharModal();
   };
 }

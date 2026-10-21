@@ -13,8 +13,8 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth
 
 import { firebaseConfig, APP_NAME } from "./firebase-config.js";
 import { initAuth, login, logout, observeAuth, restorePersistence } from "./auth.js";
-import { initRouter } from "./router.js";
-import { icon, iniciais } from "./ui.js";
+import { initRouter, focarTitulo } from "./router.js";
+import { icon, iniciais, trapFocus } from "./ui.js";
 
 // ── Tema ─────────────────────────────────────────────────
 const THEME_KEY = 'painel-theme';
@@ -153,16 +153,39 @@ btnLogout?.addEventListener('click', async () => {
   await logout();
 });
 
+// ── Mostrar/ocultar senha ────────────────────────────────
+const OLHO = '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const OLHO_FECHADO = '<path d="m3 3 18 18"/><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.9 8.4 2 12 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
+document.getElementById('btn-reveal')?.addEventListener('click', e => {
+  const btn = e.currentTarget;
+  const campo = document.getElementById('password');
+  const mostrar = campo.type === 'password';
+  campo.type = mostrar ? 'text' : 'password';
+  btn.setAttribute('aria-pressed', String(mostrar));
+  btn.querySelector('svg').innerHTML = mostrar ? OLHO_FECHADO : OLHO;
+  btn.querySelector('span').textContent = mostrar ? 'Ocultar' : 'Mostrar';
+  campo.focus();
+});
+
+// ── Atalho "pular para o conteúdo" ───────────────────────
+document.getElementById('skip-link')?.addEventListener('click', focarTitulo);
+
 // ── Menu lateral no celular/tablet ───────────────────────
 const MENU_GAVETA_MAX = 1024;
+let soltarMenu = null;
 
 function openSidebar() {
   sidebarEl?.classList.add('open');
   sidebarOverlay?.classList.add('open');
+  soltarMenu = trapFocus(sidebarEl);
+  sidebarEl?.querySelector('.nav-link.active, .nav-link')?.focus();
 }
 function closeSidebar() {
-  sidebarEl?.classList.remove('open');
+  if (!sidebarEl?.classList.contains('open')) return;
+  sidebarEl.classList.remove('open');
   sidebarOverlay?.classList.remove('open');
+  soltarMenu?.();
+  soltarMenu = null;
 }
 btnMenuOpen?.addEventListener('click', openSidebar);
 btnMenuClose?.addEventListener('click', closeSidebar);

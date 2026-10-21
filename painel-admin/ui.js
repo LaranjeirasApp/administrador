@@ -43,6 +43,9 @@ const ICONS = {
   mail: '<rect x="2.5" y="4.5" width="19" height="15" rx="2"/><path d="m3 6 9 7 9-7"/>',
   filter: '<path d="M3.5 5h17l-6.5 8v6l-4 1.5V13z"/>',
   trash: '<path d="M4 6.5h16"/><path d="M9.5 6.5V4h5v2.5"/><path d="M6.2 6.5 7.2 20h9.6l1-13.5"/><path d="M10 10.5v6M14 10.5v6"/>',
+  sortNone: '<path d="m7.5 15 4.5 4.5 4.5-4.5"/><path d="m7.5 9 4.5-4.5L16.5 9"/>',
+  sortAsc: '<path d="M12 19V5.5"/><path d="m6 11.5 6-6 6 6"/>',
+  sortDesc: '<path d="M12 5v13.5"/><path d="m18 12.5-6 6-6-6"/>',
 };
 
 export function icon(name, size = 18, cls = '') {
@@ -293,6 +296,62 @@ export function pagerHtml(page, totalPages, total, perPage, noun = 'registros') 
     </div>`;
 }
 
+// ── Foco preso em janelas abertas ────────────────────────
+// Enquanto uma janela (diálogo, painel lateral) está aberta, o Tab circula só
+// dentro dela. Pilha: a confirmação aberta por cima do painel lateral manda.
+const FOCAVEIS = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+const pilhaFoco = [];
+
+document.addEventListener('keydown', e => {
+  const root = pilhaFoco[pilhaFoco.length - 1];
+  if (e.key !== 'Tab' || !root) return;
+  const els = [...root.querySelectorAll(FOCAVEIS)].filter(el => el.offsetParent !== null);
+  if (!els.length) { e.preventDefault(); return; }
+  const first = els[0], last = els[els.length - 1], atual = document.activeElement;
+  if (e.shiftKey && (atual === first || !root.contains(atual))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (atual === last || !root.contains(atual))) { e.preventDefault(); first.focus(); }
+});
+
+/** Prende o Tab em root. Retorna a função que solta e devolve o foco a quem abriu. */
+export function trapFocus(root) {
+  const anterior = document.activeElement;
+  pilhaFoco.push(root);
+  return () => {
+    const i = pilhaFoco.lastIndexOf(root);
+    if (i >= 0) pilhaFoco.splice(i, 1);
+    if (anterior && document.contains(anterior) && typeof anterior.focus === 'function') anterior.focus({ preventScroll: true });
+  };
+}
+
+// ── Botão ocupado ────────────────────────────────────────
+/** Trava o botão com um texto de espera ("Salvando…"). Retorna a função que destrava. */
+export function ocupado(btn, texto = 'Salvando…') {
+  if (!btn) return () => {};
+  const html = btn.innerHTML;
+  const largura = btn.offsetWidth;
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  if (largura) btn.style.minWidth = largura + 'px';
+  btn.innerHTML = `<span class="spinner" aria-hidden="true"></span>${escHtml(texto)}`;
+  return () => {
+    if (!document.contains(btn)) return;
+    btn.disabled = false;
+    btn.removeAttribute('aria-busy');
+    btn.style.minWidth = '';
+    btn.innerHTML = html;
+  };
+}
+
+// ── Cabeçalho de coluna ordenável ────────────────────────
+/** <th> com botão de ordenar. estado = { chave, dir }. */
+export function thOrdenavel(chave, rotulo, estado, extraClass = '') {
+  const ativo = estado?.chave === chave;
+  const dir = ativo ? estado.dir : null;
+  const aria = dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none';
+  const ico = dir === 'asc' ? 'sortAsc' : dir === 'desc' ? 'sortDesc' : 'sortNone';
+  return `<th class="sortable ${extraClass}" aria-sort="${aria}"><button type="button" class="th-sort" data-sort="${chave}">${rotulo}${icon(ico, 14)}</button></th>`;
+}
+
 // ── Diálogo de confirmação ───────────────────────────────
 export function confirmDialog({ title, message = '', confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'primary' }) {
   return new Promise(resolve => {
@@ -310,9 +369,11 @@ export function confirmDialog({ title, message = '', confirmLabel = 'Confirmar',
         </div>
       </div>`;
     document.body.appendChild(wrap);
-    const done = v => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
-    const onKey = e => { if (e.key === 'Escape') done(false); };
-    document.addEventListener('keydown', onKey);
+    const soltar = trapFocus(wrap);
+    const done = v => { wrap.remove(); document.removeEventListener('keydown', onKey, true); soltar(); resolve(v); };
+    // captura: o Esc fecha só a confirmação, não o painel lateral que está embaixo
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); done(false); } };
+    document.addEventListener('keydown', onKey, true);
     wrap.addEventListener('click', e => {
       if (e.target === wrap) return done(false);
       const b = e.target.closest('[data-r]');

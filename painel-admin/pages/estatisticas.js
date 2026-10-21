@@ -8,7 +8,7 @@
 
 import { ref, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import {
-  fbToArray, filtrarPorPeriodo, calcularEstatisticas, calcularDiaChave, diaLocalISO, escHtml,
+  fbToArray, filtrarPorPeriodo, calcularEstatisticas, calcularDiaChave, diaLocalISO, escHtml, diaMaisCheio,
 } from "../utils.js";
 import {
   icon, emptyState, loading, errorBox, minutosEntre, cssVar, onThemeChange,
@@ -217,16 +217,27 @@ function renderBody(a, de, ate) {
 
   const serie = montarSerie(a.porDiaTipo, de, ate);
   const horas = faixaHoras(a.porHora);
+  // resumo em texto dos gráficos: aparece no cabeçalho e é lido pelo leitor de tela
+  const pico = diaMaisCheio(a.porDiaTipo);
+  const ddmm = d => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const resumoDia = pico ? `Dia mais cheio: ${ddmm(pico.dia)}, com ${pico.total} ${pico.total === 1 ? 'partida' : 'partidas'}` : '';
+  const ariaDia = `${serie.semanal ? 'Partidas por semana' : 'Partidas por dia'}: ${a.total} no período, ${a.total - a.duplas} simples e ${a.duplas} duplas.`
+    + (pico ? ` Dia mais cheio: ${ddmm(pico.dia)}, com ${pico.total} (${pico.simples} simples e ${pico.duplas} duplas).` : '');
+  const maxHora = Math.max(...a.porHora);
+  const ariaHora = maxHora
+    ? `Partidas por horário de início. ${horaPico(a.porHora)}, com ${maxHora} ${maxHora === 1 ? 'partida' : 'partidas'}.`
+    : 'Partidas por horário de início.';
 
   body.innerHTML = `
     <div class="grid grid-main">
       <section class="panel panel-fill">
         <div class="panel-head">
           <h2 class="panel-title">${serie.semanal ? 'Partidas por semana' : 'Partidas por dia'}</h2>
+          <span class="panel-meta">${escHtml(resumoDia)}</span>
           <span class="spacer"></span>
           <div class="legend"><span><i style="background:var(--primary)"></i>Simples</span><span><i style="background:var(--clay)"></i>Duplas</span></div>
         </div>
-        <div class="panel-body"><div class="chart-box"><canvas id="chart-por-dia" aria-label="Partidas por período" role="img"></canvas></div></div>
+        <div class="panel-body"><div class="chart-box"><canvas id="chart-por-dia" aria-label="${escHtml(ariaDia)}" role="img"></canvas></div></div>
       </section>
 
       <div class="stack">
@@ -263,7 +274,7 @@ function renderBody(a, de, ate) {
           <h2 class="panel-title">Horário de início</h2>
           <span class="panel-meta">${horaPico(a.porHora)}</span>
         </div>
-        <div class="panel-body"><div class="chart-box chart-box-sm"><canvas id="chart-hora" aria-label="Partidas por horário de início" role="img"></canvas></div></div>
+        <div class="panel-body"><div class="chart-box chart-box-sm"><canvas id="chart-hora" aria-label="${escHtml(ariaHora)}" role="img"></canvas></div></div>
       </section>
 
       <section class="panel">

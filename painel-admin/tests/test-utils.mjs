@@ -15,6 +15,8 @@ import {
   formatarWhatsapp,
   pluralize,
   linkConvite,
+  ordenarLista,
+  diaMaisCheio,
 } from '../utils.js';
 
 let passed = 0, failed = 0;
@@ -123,6 +125,28 @@ section('linkConvite');
 assert('formato /convite/{token}', linkConvite('https://laranjeiras.web.app', 'K7MPQ2XRTN4H'), 'https://laranjeiras.web.app/convite/K7MPQ2XRTN4H');
 assert('origem com barra no fim', linkConvite('https://laranjeiras.web.app/', 'ABC'), 'https://laranjeiras.web.app/convite/ABC');
 assert('token sem convite', linkConvite('https://laranjeiras.web.app', ''), '');
+
+// ── ordenarLista (colunas das tabelas) ──────────────────
+section('ordenarLista');
+const nums = [{ v: 3 }, { v: 10 }, { v: 1 }];
+assert('números crescente', ordenarLista(nums, x => x.v, 'asc').map(x => x.v), [1, 3, 10]);
+assert('números decrescente', ordenarLista(nums, x => x.v, 'desc').map(x => x.v), [10, 3, 1]);
+assert('não altera a lista original', nums.map(x => x.v), [3, 10, 1]);
+const nomes = [{ n: 'Bruno' }, { n: 'ágata' }, { n: 'Álvaro' }, { n: 'carla' }];
+assert('texto em ordem alfabética do português (acento e maiúscula)', ordenarLista(nomes, x => x.n, 'asc').map(x => x.n), ['ágata', 'Álvaro', 'Bruno', 'carla']);
+const vazios = [{ v: '' }, { v: 'b' }, { v: null }, { v: 'a' }];
+assert('vazios no fim (crescente)', ordenarLista(vazios, x => x.v, 'asc').map(x => x.v), ['a', 'b', '', null]);
+assert('vazios no fim (decrescente)', ordenarLista(vazios, x => x.v, 'desc').map(x => x.v), ['b', 'a', '', null]);
+const empate = [{ k: 1, id: 'x' }, { k: 0, id: 'y' }, { k: 1, id: 'z' }];
+assert('empate mantém a ordem anterior', ordenarLista(empate, x => x.k, 'desc').map(x => x.id), ['x', 'z', 'y']);
+assert('código de unidade com número', ordenarLista([{ id: '10-02' }, { id: '02-10' }, { id: '02-04' }], x => x.id, 'asc').map(x => x.id), ['02-04', '02-10', '10-02']);
+
+// ── diaMaisCheio (resumo do gráfico) ────────────────────
+section('diaMaisCheio');
+assert('acha o dia com mais partidas', diaMaisCheio({ '2026-10-01': { s: 2, d: 1 }, '2026-10-03': { s: 10, d: 4 }, '2026-10-02': { s: 5, d: 0 } }),
+  { dia: '2026-10-03', total: 14, simples: 10, duplas: 4 });
+assert('empate fica com o dia mais recente', diaMaisCheio({ '2026-10-01': { s: 3, d: 0 }, '2026-10-05': { s: 1, d: 2 } }).dia, '2026-10-05');
+assert('sem partidas', diaMaisCheio({}), null);
 
 // ── Dia de Brasília, qualquer que seja o fuso do computador ──
 // Fica no fim do arquivo porque troca o fuso do processo (process.env.TZ).

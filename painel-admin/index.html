@@ -70,7 +70,7 @@
 
       <div id="login-error" class="login-error" role="alert"></div>
 
-      <form id="login-form" class="login-form" autocomplete="off" novalidate>
+      <form id="login-form" class="login-form" novalidate>
         <div class="field">
           <label class="label" for="username">Usuário</label>
           <input id="username" name="username" type="text" class="input"
@@ -78,8 +78,14 @@
         </div>
         <div class="field">
           <label class="label" for="password">Senha</label>
-          <input id="password" name="password" type="password" class="input"
-            autocomplete="current-password" required>
+          <div class="input-reveal">
+            <input id="password" name="password" type="password" class="input"
+              autocomplete="current-password" required>
+            <button type="button" class="reveal-btn" id="btn-reveal" aria-controls="password" aria-pressed="false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              <span>Mostrar</span>
+            </button>
+          </div>
         </div>
         <label class="login-remember" for="lembrar">
           <input type="checkbox" id="lembrar" name="lembrar">
@@ -93,6 +99,8 @@
 
 <!-- ── Aplicação ─────────────────────────────────────────── -->
 <div id="app" hidden>
+
+  <button type="button" class="skip-link" id="skip-link">Pular para o conteúdo</button>
 
   <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
@@ -200,7 +208,7 @@
       </div>
     </header>
 
-    <div id="page-root"></div>
+    <main id="page-root"></main>
   </div>
 </div>
 

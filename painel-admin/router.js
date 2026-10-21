@@ -86,6 +86,7 @@ async function handleHash() {
   try {
     const mod = await PAGES[route]();
     _currentDestroy = await mod.render(_container, _ctx) ?? null;
+    focarTitulo();
   } catch (err) {
     console.error('Erro ao carregar página:', err);
     const msg = String(err?.message || '').replace(/[<>&"]/g, '');
@@ -98,6 +99,14 @@ async function handleHash() {
         </div>
       </div>`;
   }
+}
+
+/** Leva o foco ao título da página (troca de página e atalho "pular para o conteúdo"). */
+export function focarTitulo() {
+  const h1 = _container?.querySelector('h1');
+  if (!h1) return;
+  h1.setAttribute('tabindex', '-1');
+  h1.focus({ preventScroll: true });
 }
 
 /** Recarrega a rota atual (útil após operações de escrita). */

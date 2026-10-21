@@ -9,15 +9,35 @@
 import { ref, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 import {
   fbToArray, filtrarPorPeriodo, formatDate, formatTime,
-  formatDuration, escHtml, normalizarNome, calcularDiaChave
+  formatDuration, escHtml, normalizarNome, calcularDiaChave, ordenarLista,
 } from "../utils.js";
 import {
   icon, nomesDe, detalhesDe, tipoBadge, origemBadge, emptyState, loading, errorBox,
-  pagerHtml, minutosEntre, duracaoCurta, diaSemanaCurto,
+  pagerHtml, minutosEntre, duracaoCurta, diaSemanaCurto, thOrdenavel,
 } from "../ui.js";
 
 const PER_PAGE = 15;
 const PRESETS = { '7': 7, '30': 30, '90': 90 };
+// filtros guardados só enquanto a aba do navegador estiver aberta
+const CHAVE_FILTROS = 'painel-historico-filtros';
+const ORDEM_PADRAO = { chave: 'data', dir: 'desc' };
+
+// valor usado para ordenar cada coluna
+const CAMPOS = {
+  data: h => h.data || '',
+  horario: h => h.t || '',
+  quadra: h => Number(h.q) || null,
+  tipo: h => Number(h.duracao) || null,
+  jogadores: h => { const n = nomesDe(h); return n === '—' ? '' : n; },
+  origem: h => h.origem === 'usuario' ? 'App' : h.origem === 'admin' ? 'Fiscal' : '',
+};
+
+function lerFiltros() {
+  try { return JSON.parse(sessionStorage.getItem(CHAVE_FILTROS) || 'null'); } catch { return null; }
+}
+function guardarFiltros(f) {
+  try { sessionStorage.setItem(CHAVE_FILTROS, JSON.stringify(f)); } catch {}
+}
 
 export async function render(container, { db, showToast }) {
   container.innerHTML = `
@@ -80,6 +100,18 @@ export async function render(container, { db, showToast }) {
   let allData = [];
   let filtered = [];
   let page = 1;
+  let ordem = { ...ORDEM_PADRAO };
+
+  // volta com os filtros de quando a página foi usada por último
+  const salvos = lerFiltros();
+  if (salvos) {
+    $('hist-search').value = salvos.q || '';
+    $('hist-de').value = salvos.de ?? trinta;
+    $('hist-ate').value = salvos.ate ?? hoje;
+    $('hist-tipo').value = salvos.tipo || '';
+    $('hist-quadra').value = salvos.quadra || '';
+    if (salvos.ordem && CAMPOS[salvos.ordem.chave]) ordem = salvos.ordem;
+  }
 
   try {
     const snap = await get(ref(db, 'historico'));
@@ -124,7 +156,10 @@ export async function render(container, { db, showToast }) {
     }
     if (tipo) filtered = filtered.filter(h => String(h.duracao) === tipo);
     if (quadra) filtered = filtered.filter(h => String(h.q) === quadra);
+    // allData já vem do mais recente para o mais antigo: empates ficam nessa ordem
+    filtered = ordenarLista(filtered, CAMPOS[ordem.chave], ordem.dir);
 
+    guardarFiltros({ q: $('hist-search').value, de, ate, tipo, quadra, ordem });
     marcarPreset();
     renderSummary();
     renderTable();
@@ -166,7 +201,14 @@ export async function render(container, { db, showToast }) {
       <div class="table-scroll">
         <table class="table table-stack table-compact">
           <thead>
-            <tr><th>Data</th><th>Horário</th><th>Quadra</th><th>Tipo</th><th>Jogadores</th><th>Origem</th></tr>
+            <tr>
+              ${thOrdenavel('data', 'Data', ordem)}
+              ${thOrdenavel('horario', 'Horário', ordem)}
+              ${thOrdenavel('quadra', 'Quadra', ordem)}
+              ${thOrdenavel('tipo', 'Tipo', ordem)}
+              ${thOrdenavel('jogadores', 'Jogadores', ordem)}
+              ${thOrdenavel('origem', 'Origem', ordem)}
+            </tr>
           </thead>
           <tbody>
             ${pageItems.map(h => `
@@ -194,6 +236,7 @@ export async function render(container, { db, showToast }) {
     $('hist-ate').value = hoje;
     $('hist-tipo').value = '';
     $('hist-quadra').value = '';
+    ordem = { ...ORDEM_PADRAO };
     applyFilters();
   }
 
@@ -207,7 +250,17 @@ export async function render(container, { db, showToast }) {
       applyFilters();
     }));
     $('hist-clear').addEventListener('click', limpar);
-    $('hist-table').addEventListener('click', e => { if (e.target.closest('[data-action="limpar"]')) limpar(); });
+    $('hist-table').addEventListener('click', e => {
+      if (e.target.closest('[data-action="limpar"]')) return limpar();
+      const s = e.target.closest('[data-sort]');
+      if (!s) return;
+      const k = s.dataset.sort;
+      ordem = ordem.chave === k
+        ? { chave: k, dir: ordem.dir === 'asc' ? 'desc' : 'asc' }
+        : { chave: k, dir: k === 'data' ? 'desc' : 'asc' };
+      applyFilters();
+      $('hist-table').querySelector(`[data-sort="${k}"]`)?.focus();
+    });
     $('hist-pagination').addEventListener('click', e => {
       const p = e.target.closest('[data-p]');
       if (p && !p.disabled) { page = Number(p.dataset.p); renderTable(); $('hist-table').scrollIntoView({ block: 'nearest' }); }
